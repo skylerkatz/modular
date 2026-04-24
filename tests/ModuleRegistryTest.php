@@ -2,6 +2,7 @@
 
 namespace InterNACHI\Modular\Tests;
 
+use Illuminate\Support\Collection;
 use InterNACHI\Modular\Support\ModuleConfig;
 use InterNACHI\Modular\Support\ModuleRegistry;
 use InterNACHI\Modular\Tests\Concerns\WritesToAppFilesystem;
@@ -9,7 +10,41 @@ use InterNACHI\Modular\Tests\Concerns\WritesToAppFilesystem;
 class ModuleRegistryTest extends TestCase
 {
 	use WritesToAppFilesystem;
-	
+
+	public function test_module_for_class_prefers_longest_matching_namespace(): void
+	{
+		$general = new ModuleConfig('general', '/tmp/general', new Collection([
+			'/tmp/general/src' => 'App\\General\\',
+		]));
+
+		$specific = new ModuleConfig('specific', '/tmp/specific', new Collection([
+			'/tmp/general-specific/src' => 'App\\General\\Specific\\',
+		]));
+
+		$specific_model = 'App\\General\\Specific\\Models\\Thing';
+
+		foreach ([[$general, $specific], [$specific, $general]] as $modules) {
+			$registry = new ModuleRegistry(
+				modules_path: '/tmp',
+				modules_loader: fn() => Collection::make($modules)->keyBy->name,
+			);
+
+			$this->assertSame(
+				'specific',
+				$registry->moduleForClass($specific_model)?->name,
+				'Expected the more-specific module to win regardless of iteration order',
+			);
+		}
+
+		$registry = new ModuleRegistry(
+			modules_path: '/tmp',
+			modules_loader: fn() => Collection::make([$general, $specific])->keyBy->name,
+		);
+
+		$this->assertSame('general', $registry->moduleForClass('App\\General\\Models\\Plain')?->name);
+		$this->assertNull($registry->moduleForClass('Unrelated\\Thing'));
+	}
+
 	public function test_it_resolves_modules(): void
 	{
 		$this->makeModule('test-module');

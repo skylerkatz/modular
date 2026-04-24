@@ -9,78 +9,92 @@ use InterNACHI\Modular\Exceptions\CannotFindModuleForPathException;
 
 class ModuleRegistry
 {
-	protected ?Collection $modules = null;
-	
-	public function __construct(
-		protected string $modules_path,
-		protected Closure $modules_loader,
+    protected ?Collection $modules = null;
+
+    protected ?array $namespace_index = null;
+
+    public function __construct(
+        protected string  $modules_path,
+        protected Closure $modules_loader,
 	) {
-	}
-	
-	public function getModulesPath(): string
-	{
-		return $this->modules_path;
-	}
-	
-	public function module(?string $name = null): ?ModuleConfig
-	{
-		// We want to allow for gracefully handling empty/null names
-		return $name ? $this->modules()->get($name) : null;
-	}
-	
-	public function moduleForPath(string $path): ?ModuleConfig
-	{
-		return $this->module($this->extractModuleNameFromPath($path));
-	}
-	
-	public function moduleForPathOrFail(string $path): ModuleConfig
-	{
-		if ($module = $this->moduleForPath($path)) {
-			return $module;
-		}
-		
-		throw new CannotFindModuleForPathException($path);
-	}
-	
-	public function moduleForClass(string $fqcn): ?ModuleConfig
-	{
-		return $this->modules()->first(function(ModuleConfig $module) use ($fqcn) {
-			foreach ($module->namespaces as $namespace) {
-				if (Str::startsWith($fqcn, $namespace)) {
-					return true;
-				}
-			}
-			
-			return false;
-		});
-	}
-	
-	/** @return Collection<int, \InterNACHI\Modular\Support\ModuleConfig> */
-	public function modules(): Collection
-	{
-		return $this->modules ??= call_user_func($this->modules_loader);
-	}
-	
-	public function reload(): Collection
-	{
-		$this->modules = null;
-		
-		return $this->modules();
-	}
-	
-	protected function extractModuleNameFromPath(string $path): string
-	{
-		// Handle Windows-style paths
-		$path = str_replace('\\', '/', $path);
-		
-		// If the modules directory is symlinked, we may get two paths that are actually
-		// in the same directory, but have different prefixes. This helps resolve that.
-		if (Str::startsWith($path, $this->modules_path)) {
-			$path = trim(Str::after($path, $this->modules_path), '/');
-		} elseif (Str::startsWith($path, $modules_real_path = str_replace('\\', '/', realpath($this->modules_path)))) {
-			$path = trim(Str::after($path, $modules_real_path), '/');
-		}
-		
-		return explode('/', $path)[0];
-	}
+    }
+
+    public function getModulesPath(): string
+    {
+        return $this->modules_path;
+    }
+
+    public function module(?string $name = null): ?ModuleConfig
+    {
+        // We want to allow for gracefully handling empty/null names
+        return $name ? $this->modules()->get($name) : null;
+    }
+
+    public function moduleForPath(string $path): ?ModuleConfig
+    {
+        return $this->module($this->extractModuleNameFromPath($path));
+    }
+
+    public function moduleForPathOrFail(string $path): ModuleConfig
+    {
+        if ($module = $this->moduleForPath($path)) {
+            return $module;
+        }
+
+        throw new CannotFindModuleForPathException($path);
+    }
+
+    public function moduleForClass(string $fqcn): ?ModuleConfig
+    {
+        foreach ($this->namespaceIndex() as $namespace => $module) {
+            if (Str::startsWith($fqcn, $namespace)) {
+                return $module;
+            }
+        }
+
+        return null;
+    }
+
+    /** @return Collection<int, ModuleConfig> */
+    public function modules(): Collection
+    {
+        return $this->modules ??= call_user_func($this->modules_loader);
+    }
+
+    public function reload(): Collection
+    {
+        $this->modules = null;
+        $this->namespace_index = null;
+
+        return $this->modules();
+    }
+
+    /**
+     * Namespaces sorted descending so the most-specific prefix wins on first match.
+     *
+     * @return array<string, ModuleConfig>
+     */
+    protected function namespaceIndex(): array
+    {
+        return $this->namespace_index ??= $this->modules()
+            ->flatMap(fn(ModuleConfig $module) => $module->namespaces->mapWithKeys(fn(string $namespace) => [$namespace => $module]))
+            ->sortKeysDesc()
+            ->all();
+    }
+
+    protected function extractModuleNameFromPath(string $path): string
+    {
+        // Handle Windows-style paths
+        $path = str_replace('\\', '/', $path);
+
+        // If the modules directory is symlinked, we may get two paths that are actually
+        // in the same directory, but have different prefixes. This helps resolve that.
+        if (Str::startsWith($path, $this->modules_path)) {
+            $path = trim(Str::after($path, $this->modules_path), '/');
+        } elseif (Str::startsWith($path, $modules_real_path = str_replace('\\', '/', realpath($this->modules_path)))) {
+            $path = trim(Str::after($path, $modules_real_path), '/');
+        }
+
+        return explode('/', $path)[0];
+    }
 }
