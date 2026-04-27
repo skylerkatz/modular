@@ -15,34 +15,59 @@ class ModuleRegistryTest extends TestCase
 	{
 		$general = new ModuleConfig('general', '/tmp/general', new Collection([
 			'/tmp/general/src' => 'App\\General\\',
+			'/tmp/general/tests' => 'App\\General\\Tests',
 		]));
-
+		
 		$specific = new ModuleConfig('specific', '/tmp/specific', new Collection([
 			'/tmp/general-specific/src' => 'App\\General\\Specific\\',
+			'/tmp/general-specific/tests' => 'App\\General\\Specific\\Tests',
 		]));
-
+		
+		$loader_orders = [
+			[$general, $specific],
+			[$specific, $general],
+		];
+		
 		$specific_model = 'App\\General\\Specific\\Models\\Thing';
-
-		foreach ([[$general, $specific], [$specific, $general]] as $modules) {
+		$specific_test = 'App\\General\\Specific\\Tests\\ThingTest';
+		$general_model = 'App\\General\\Models\\Thing';
+		$general_test = 'App\\General\\Tests\\ThingTest';
+		
+		foreach ($loader_orders as $modules) {
 			$registry = new ModuleRegistry(
 				modules_path: '/tmp',
-				modules_loader: fn() => Collection::make($modules)->keyBy->name,
+				modules_loader: fn() => Collection::make($modules)->keyBy('name'),
 			);
-
-			$this->assertSame(
-				'specific',
-				$registry->moduleForClass($specific_model)?->name,
-				'Expected the more-specific module to win regardless of iteration order',
+			
+			$this->assertEquals(
+				$specific,
+				$registry->moduleForClass($specific_model),
+				'Expected the more-specific module to win regardless of registration order (primary namespace)',
+			);
+			
+			$this->assertEquals(
+				$specific,
+				$registry->moduleForClass($specific_test),
+				'Expected the more-specific module to win regardless of registration order (secondary namespace)',
+			);
+			
+			$this->assertEquals(
+				$general,
+				$registry->moduleForClass($general_model),
+				'Expected the general module to return when a more-specific namespace does not match (primary namespace)',
+			);
+			
+			$this->assertEquals(
+				$general,
+				$registry->moduleForClass($general_test),
+				'Expected the general module to return when a more-specific namespace does not match (secondary namespace)',
+			);
+			
+			$this->assertNull(
+				$registry->moduleForClass('Unrelated\\Thing'),
+				'Expected unrelated class not to match any module regardless of order'
 			);
 		}
-
-		$registry = new ModuleRegistry(
-			modules_path: '/tmp',
-			modules_loader: fn() => Collection::make([$general, $specific])->keyBy->name,
-		);
-
-		$this->assertSame('general', $registry->moduleForClass('App\\General\\Models\\Plain')?->name);
-		$this->assertNull($registry->moduleForClass('Unrelated\\Thing'));
 	}
 
 	public function test_it_resolves_modules(): void
